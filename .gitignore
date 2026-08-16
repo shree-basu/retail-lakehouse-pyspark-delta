@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Generated data
+data/raw/
+data/bronze/
+data/silver/
+data/gold/
+
+# Spark
+.sparkStaging/
+metastore_db/
+derby.log
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
