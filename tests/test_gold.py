@@ -5,8 +5,7 @@ from src.gold import build_customer_sales, build_product_sales
 
 def create_test_spark():
     return (
-        SparkSession.builder
-        .master("local[2]")
+        SparkSession.builder.master("local[2]")
         .appName("RetailLakehouse-Gold-Tests")
         .config("spark.ui.enabled", "false")
         .getOrCreate()
@@ -47,9 +46,8 @@ def test_build_customer_sales():
         "payment_method",
     ]
 
-    orders = (
-        spark.createDataFrame(orders_data, orders_columns)
-        .withColumn("order_date", __import__("pyspark.sql.functions").sql.functions.to_date("order_date"))
+    orders = spark.createDataFrame(orders_data, orders_columns).withColumn(
+        "order_date", __import__("pyspark.sql.functions").sql.functions.to_date("order_date")
     )
 
     order_items_data = [

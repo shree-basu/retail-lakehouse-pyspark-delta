@@ -5,8 +5,7 @@ from src.churn import build_customer_churn
 
 def create_test_spark():
     return (
-        SparkSession.builder
-        .master("local[2]")
+        SparkSession.builder.master("local[2]")
         .appName("RetailLakehouse-Churn-Tests")
         .config("spark.ui.enabled", "false")
         .getOrCreate()
@@ -34,14 +33,9 @@ def test_build_customer_churn_labels_inactive_customers():
         "last_order_date",
     ]
 
-    df = (
-        spark.createDataFrame(data, columns)
-        .withColumn(
-            "last_order_date",
-            __import__("pyspark.sql.functions").sql.functions.to_date(
-                "last_order_date"
-            ),
-        )
+    df = spark.createDataFrame(data, columns).withColumn(
+        "last_order_date",
+        __import__("pyspark.sql.functions").sql.functions.to_date("last_order_date"),
     )
 
     result = build_customer_churn(df)
