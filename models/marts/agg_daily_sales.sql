@@ -9,8 +9,8 @@
 with changed_dates as (
     select distinct order_date
     from {{ ref('fct_order_items') }}
-    where source_updated_at >= (
-        select coalesce(max(source_updated_at), cast('1900-01-01' as timestamp)) from {{ this }}
+    where pipeline_ingested_at >= (
+        select coalesce(max(pipeline_ingested_at), cast('1900-01-01' as timestamp)) from {{ this }}
     )
 ),
 {% else %}
@@ -22,7 +22,8 @@ daily as (
         count(distinct order_id) as order_count,
         sum(quantity) as items_sold,
         cast(sum(line_revenue) as decimal(20, 2)) as revenue,
-        max(source_updated_at) as source_updated_at
+        max(source_updated_at) as source_updated_at,
+        max(pipeline_ingested_at) as pipeline_ingested_at
     from {{ ref('fct_order_items') }}
     where status = 'completed'
     {% if is_incremental() %}

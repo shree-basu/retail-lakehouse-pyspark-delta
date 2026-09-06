@@ -32,7 +32,9 @@ joined as (
         oi.quantity,
         oi.unit_price,
         cast(oi.quantity * oi.unit_price as decimal(20, 2)) as line_revenue,
-        greatest(oi.updated_at, o.updated_at, p.updated_at, c.updated_at) as source_updated_at
+        greatest(oi.updated_at, o.updated_at, p.updated_at, c.updated_at) as source_updated_at,
+        greatest(oi._ingested_at, o._ingested_at, p._ingested_at, c._ingested_at)
+            as pipeline_ingested_at
     from order_items oi
     inner join orders o on oi.order_id = o.order_id
     inner join products p on oi.product_id = p.product_id
@@ -40,7 +42,7 @@ joined as (
 )
 select * from joined
 {% if is_incremental() %}
-where source_updated_at >= (
-    select coalesce(max(source_updated_at), cast('1900-01-01' as timestamp)) from {{ this }}
+where pipeline_ingested_at >= (
+    select coalesce(max(pipeline_ingested_at), cast('1900-01-01' as timestamp)) from {{ this }}
 )
 {% endif %}
