@@ -1,20 +1,7 @@
-from pyspark.sql import SparkSession
-
 from src.churn import build_customer_churn
 
 
-def create_test_spark():
-    return (
-        SparkSession.builder.master("local[2]")
-        .appName("RetailLakehouse-Churn-Tests")
-        .config("spark.ui.enabled", "false")
-        .getOrCreate()
-    )
-
-
-def test_build_customer_churn_labels_inactive_customers():
-    spark = create_test_spark()
-
+def test_build_customer_churn_labels_inactive_customers(spark):
     data = [
         (1, "Alice", "US", "premium", 5, 10, 500.0, 100.0, "2024-12-15"),
         (2, "Bob", "UK", "standard", 2, 4, 200.0, 100.0, "2024-09-01"),
@@ -47,5 +34,3 @@ def test_build_customer_churn_labels_inactive_customers():
     assert alice.churn_label == 0
     assert bob.churn_label == 1
     assert charlie.churn_label == 1
-
-    spark.stop()

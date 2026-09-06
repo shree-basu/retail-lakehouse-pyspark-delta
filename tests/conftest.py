@@ -24,16 +24,12 @@ def pytest_sessionstart() -> None:
 @pytest.fixture(scope="session")
 def spark():
     _configure_python_worker()
-    from pyspark.sql import SparkSession
+    from src.spark_session import create_spark_session
 
-    session = (
-        SparkSession.builder.master("local[2]")
-        .appName("RetailLakehouse-ContractTests")
-        .config("spark.ui.enabled", "false")
-        .config("spark.sql.session.timeZone", "UTC")
-        .config("spark.sql.shuffle.partitions", "4")
-        .config("spark.sql.adaptive.enabled", "true")
-        .getOrCreate()
-    )
+    # The first SparkContext in a Python process fixes the JVM classpath. Start
+    # every Spark test from the Delta-configured factory so collection order
+    # cannot create a plain Spark gateway that is missing the Delta JARs.
+    session = create_spark_session("RetailLakehouse-ContractTests")
+    session.conf.set("spark.sql.shuffle.partitions", "4")
     yield session
     session.stop()
