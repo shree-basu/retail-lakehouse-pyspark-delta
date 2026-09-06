@@ -74,7 +74,13 @@ def merge_curated(frame: Any, path: Path, *, entity: str, keys: tuple[str, ...])
         DeltaTable.forPath(frame.sparkSession, str(path))
         .alias("target")
         .merge(frame.alias("source"), condition)
-        .whenMatchedUpdateAll(condition="source.updated_at >= target.updated_at")
+        .whenMatchedUpdateAll(
+            condition=(
+                "source.updated_at > target.updated_at OR "
+                "(source.updated_at = target.updated_at AND "
+                "source._record_hash > target._record_hash)"
+            )
+        )
         .whenNotMatchedInsertAll()
         .execute()
     )
