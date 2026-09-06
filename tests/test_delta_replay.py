@@ -38,6 +38,9 @@ def test_complete_delta_batch_is_replay_safe(tmp_path: Path) -> None:
         audit_count = (
             spark.read.format("delta").load(str(lakehouse / "audit" / "pipeline_metrics")).count()
         )
+        run_status = spark.read.format("delta").load(str(lakehouse / "audit" / "run_status"))
+        successful_attempts = run_status.filter("status = 'SUCCESS'").count()
+        distinct_attempts = run_status.select("attempt_id").distinct().count()
     finally:
         spark.stop()
 
@@ -45,3 +48,5 @@ def test_complete_delta_batch_is_replay_safe(tmp_path: Path) -> None:
     assert first_counts == second_counts
     assert quarantine_count == 1
     assert audit_count == 5
+    assert successful_attempts == 2
+    assert distinct_attempts == 2

@@ -116,3 +116,21 @@ def merge_audit(frame: Any, path: Path) -> None:
         .whenNotMatchedInsertAll()
         .execute()
     )
+
+
+def merge_run_status(frame: Any, path: Path) -> None:
+    """Insert or update one execution attempt in the Delta run ledger."""
+
+    from delta.tables import DeltaTable
+
+    if not DeltaTable.isDeltaTable(frame.sparkSession, str(path)):
+        frame.write.format("delta").mode("overwrite").partitionBy("business_date").save(str(path))
+        return
+    (
+        DeltaTable.forPath(frame.sparkSession, str(path))
+        .alias("target")
+        .merge(frame.alias("source"), "target.attempt_id = source.attempt_id")
+        .whenMatchedUpdateAll()
+        .whenNotMatchedInsertAll()
+        .execute()
+    )

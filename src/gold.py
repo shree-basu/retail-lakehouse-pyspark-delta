@@ -82,7 +82,7 @@ def build_product_sales(
             F.round(F.sum("line_revenue"), 2).alias("revenue"),
             F.round(F.avg("unit_price"), 2).alias("avg_unit_price"),
         )
-        .join(products, on="product_id", how="left")
+        .join(F.broadcast(products), on="product_id", how="left")
         .select(
             "product_id",
             "product_name",

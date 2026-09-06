@@ -1,0 +1,14 @@
+version: 2
+
+sources:
+  - name: silver
+    catalog: "{{ var('silver_catalog', 'retail') }}"
+    schema: "{{ var('silver_schema', 'silver') }}"
+    config:
+      loaded_at_field: updated_at
+    tables:
+      - name: customers
+      - name: products
+      - name: orders
+      - name: order_items
+      - name: customer_events
