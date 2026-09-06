@@ -6,9 +6,10 @@ import argparse
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from retail_lakehouse.contracts import ENTITY_CONTRACTS, load_and_validate_manifest
 from retail_lakehouse.delta_io import (
@@ -16,6 +17,7 @@ from retail_lakehouse.delta_io import (
     merge_audit,
     merge_curated,
     merge_quarantine,
+    merge_run_status,
     read_source_frame,
 )
 from retail_lakehouse.quality import (
@@ -49,6 +51,10 @@ class LakehousePaths:
     @property
     def audit(self) -> Path:
         return self.root / "audit" / "pipeline_metrics"
+
+    @property
+    def run_status(self) -> Path:
+        return self.root / "audit" / "run_status"
 
 
 def run_id(manifest: dict[str, Any]) -> str:
@@ -86,6 +92,56 @@ def _audit_frame(
     )
 
 
+def _run_status_frame(
+    spark: Any,
+    *,
+    attempt_id: str,
+    run_identifier: str,
+    manifest: dict[str, Any],
+    status: str,
+    started_at: datetime,
+    finished_at: datetime | None = None,
+    error: BaseException | None = None,
+) -> Any:
+    from pyspark.sql.types import (
+        DateType,
+        StringType,
+        StructField,
+        StructType,
+        TimestampType,
+    )
+
+    schema = StructType(
+        [
+            StructField("attempt_id", StringType(), False),
+            StructField("run_id", StringType(), False),
+            StructField("business_date", DateType(), False),
+            StructField("batch_id", StringType(), False),
+            StructField("status", StringType(), False),
+            StructField("started_at", TimestampType(), False),
+            StructField("finished_at", TimestampType(), True),
+            StructField("error_type", StringType(), True),
+            StructField("error_message", StringType(), True),
+        ]
+    )
+    return spark.createDataFrame(
+        [
+            (
+                attempt_id,
+                run_identifier,
+                date.fromisoformat(manifest["business_date"]),
+                manifest["batch_id"],
+                status,
+                started_at,
+                finished_at,
+                type(error).__name__ if error else None,
+                str(error)[:2000] if error else None,
+            )
+        ],
+        schema,
+    )
+
+
 def _existing_or_batch_keys(spark: Any, path: Path, accepted: Any, key: str) -> Any:
     from delta.tables import DeltaTable
 
@@ -101,6 +157,66 @@ def process_batch(spark: Any, batch_dir: Path, lakehouse_root: Path) -> dict[str
     manifest = load_and_validate_manifest(batch_dir)
     paths = LakehousePaths(lakehouse_root)
     identifier = run_id(manifest)
+    attempt_id = str(uuid4())
+    started_at = datetime.now(UTC).replace(tzinfo=None)
+    merge_run_status(
+        _run_status_frame(
+            spark,
+            attempt_id=attempt_id,
+            run_identifier=identifier,
+            manifest=manifest,
+            status="RUNNING",
+            started_at=started_at,
+        ),
+        paths.run_status,
+    )
+    try:
+        metrics = _process_validated_batch(spark, batch_dir, manifest, paths, identifier)
+    except Exception as error:
+        try:
+            merge_run_status(
+                _run_status_frame(
+                    spark,
+                    attempt_id=attempt_id,
+                    run_identifier=identifier,
+                    manifest=manifest,
+                    status="FAILED",
+                    started_at=started_at,
+                    finished_at=datetime.now(UTC).replace(tzinfo=None),
+                    error=error,
+                ),
+                paths.run_status,
+            )
+        except Exception as audit_error:
+            error.add_note(f"Could not persist FAILED run state: {audit_error}")
+        raise
+    merge_run_status(
+        _run_status_frame(
+            spark,
+            attempt_id=attempt_id,
+            run_identifier=identifier,
+            manifest=manifest,
+            status="SUCCESS",
+            started_at=started_at,
+            finished_at=datetime.now(UTC).replace(tzinfo=None),
+        ),
+        paths.run_status,
+    )
+    return {
+        "run_id": identifier,
+        "attempt_id": attempt_id,
+        "status": "SUCCESS",
+        "entities": metrics,
+    }
+
+
+def _process_validated_batch(
+    spark: Any,
+    batch_dir: Path,
+    manifest: dict[str, Any],
+    paths: LakehousePaths,
+    identifier: str,
+) -> dict[str, dict[str, int]]:
     bronze: dict[str, Any] = {}
     for entity in ENTITY_CONTRACTS:
         frame = read_source_frame(spark, batch_dir, entity, manifest)
@@ -167,7 +283,7 @@ def process_batch(spark: Any, batch_dir: Path, lakehouse_root: Path) -> dict[str
             "accepted_rows": accepted_rows,
             "quarantined_rows": quarantined_rows,
         }
-    return {"run_id": identifier, "status": "SUCCESS", "entities": metrics}
+    return metrics
 
 
 def build_parser() -> argparse.ArgumentParser:

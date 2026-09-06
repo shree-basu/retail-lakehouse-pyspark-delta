@@ -17,6 +17,13 @@ data/gold/
 metastore_db/
 derby.log
 
+# dbt and local evidence artifacts
+target/
+logs/
+dbt_packages/
+.user.yml
+evidence/performance/*.json
+
 # IDE / OS
 .vscode/
 .idea/
