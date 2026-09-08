@@ -1,0 +1,11 @@
+retail_lakehouse:
+  target: ci
+  outputs:
+    ci:
+      type: databricks
+      catalog: retail
+      schema: analytics
+      host: https://example.invalid
+      http_path: /sql/1.0/warehouses/not-used
+      token: not-a-real-token
+      threads: 1

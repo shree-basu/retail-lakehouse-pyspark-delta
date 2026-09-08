@@ -1,21 +1,7 @@
-from pyspark.sql import SparkSession
-
 from src.gold import build_customer_sales, build_product_sales
 
 
-def create_test_spark():
-    return (
-        SparkSession.builder
-        .master("local[2]")
-        .appName("RetailLakehouse-Gold-Tests")
-        .config("spark.ui.enabled", "false")
-        .getOrCreate()
-    )
-
-
-def test_build_customer_sales():
-    spark = create_test_spark()
-
+def test_build_customer_sales(spark):
     customers_data = [
         (1, "Alice", "US", "premium"),
         (2, "Bob", "UK", "standard"),
@@ -47,9 +33,8 @@ def test_build_customer_sales():
         "payment_method",
     ]
 
-    orders = (
-        spark.createDataFrame(orders_data, orders_columns)
-        .withColumn("order_date", __import__("pyspark.sql.functions").sql.functions.to_date("order_date"))
+    orders = spark.createDataFrame(orders_data, orders_columns).withColumn(
+        "order_date", __import__("pyspark.sql.functions").sql.functions.to_date("order_date")
     )
 
     order_items_data = [
@@ -89,12 +74,8 @@ def test_build_customer_sales():
     assert bob.total_orders == 0
     assert bob.total_spend == 0.0
 
-    spark.stop()
 
-
-def test_build_product_sales():
-    spark = create_test_spark()
-
+def test_build_product_sales(spark):
     products_data = [
         (10, "Laptop", "electronics"),
         (11, "Mouse", "accessories"),
@@ -162,5 +143,3 @@ def test_build_product_sales():
 
     assert mouse.units_sold == 1
     assert mouse.revenue == 50.0
-
-    spark.stop()
