@@ -12,7 +12,7 @@ The manifest is the atomic delivery contract. A batch is accepted only when its 
 
 ### Bronze
 
-Bronze preserves every delivered record with lineage columns. Writes use `txnAppId` plus a deterministic `txnVersion` derived from the batch ID, making a retry of the same batch an idempotent Delta transaction. Bronze is partitioned by source business date.
+Bronze preserves every delivered record with lineage columns. Each entity write uses a deterministic `txnAppId` containing the complete `business_date/batch_id` delivery identity and `txnVersion = 0`. An exact delivery retry therefore repeats the same Delta transaction, while a reused batch ID on another business date remains a distinct delivery. Bronze is partitioned by source business date.
 
 ### Silver
 
@@ -22,7 +22,7 @@ This is intentionally not SCD Type 2. Bronze is the immutable record of deliveri
 
 ### Analytics
 
-dbt separates SQL transformations from ingestion. `fct_order_items` incrementally merges one row per item and uses the latest Silver ingestion timestamp as its processing watermark, so a late business update is not missed by a global business-time high watermark. `agg_daily_sales` identifies changed dates and recomputes the complete aggregate for those dates, preventing additive double counting. `customer_360` combines governed purchase and engagement measures.
+dbt separates SQL transformations from ingestion. `fct_order_items` incrementally merges one row per item, retains the prior date when an item moves, and uses the latest Silver ingestion timestamp as its processing watermark, so a late business update is not missed by a global business-time high watermark. `agg_daily_sales` unions the prior and current affected dates and recomputes each complete total from current fact state. A date emptied by a correction is overwritten with zero totals, preventing stale revenue and additive double counting. `customer_360` combines governed purchase and engagement measures.
 
 ## Correctness decisions
 

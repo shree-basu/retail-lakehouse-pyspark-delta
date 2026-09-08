@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -10,8 +9,10 @@ from retail_lakehouse.contracts import ENTITY_CONTRACTS
 from retail_lakehouse.schemas import PARTITION_COLUMNS
 
 
-def transaction_version(batch_id: str) -> int:
-    return int(hashlib.sha256(batch_id.encode("utf-8")).hexdigest()[:15], 16)
+def bronze_transaction_application_id(*, entity: str, business_date: str, batch_id: str) -> str:
+    """Return the stable Delta transaction identity for one immutable delivery."""
+
+    return f"retail-bronze-v1:{entity}:{business_date}:{batch_id}"
 
 
 def read_source_frame(spark: Any, batch_dir: Path, entity: str, manifest: dict[str, Any]) -> Any:
@@ -42,13 +43,27 @@ def read_source_frame(spark: Any, batch_dir: Path, entity: str, manifest: dict[s
     )
 
 
-def append_bronze(frame: Any, path: Path, *, entity: str, batch_id: str) -> None:
+def append_bronze(
+    frame: Any,
+    path: Path,
+    *,
+    entity: str,
+    business_date: str,
+    batch_id: str,
+) -> None:
     writer = (
         frame.write.format("delta")
         .mode("append")
         .option("mergeSchema", "false")
-        .option("txnAppId", f"retail-bronze-{entity}")
-        .option("txnVersion", transaction_version(batch_id))
+        .option(
+            "txnAppId",
+            bronze_transaction_application_id(
+                entity=entity,
+                business_date=business_date,
+                batch_id=batch_id,
+            ),
+        )
+        .option("txnVersion", 0)
     )
     if not path.exists():
         writer = writer.partitionBy("_source_business_date")
@@ -89,7 +104,7 @@ def merge_curated(frame: Any, path: Path, *, entity: str, keys: tuple[str, ...])
 def merge_quarantine(frame: Any, path: Path) -> None:
     from delta.tables import DeltaTable
 
-    keys = ("source_batch_id", "entity", "record_hash")
+    keys = ("business_date", "source_batch_id", "entity", "record_hash")
     if not DeltaTable.isDeltaTable(frame.sparkSession, str(path)):
         frame.write.format("delta").mode("overwrite").partitionBy("business_date", "entity").save(
             str(path)

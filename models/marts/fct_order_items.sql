@@ -2,10 +2,22 @@
     materialized='incremental',
     incremental_strategy='merge',
     unique_key='order_item_id',
+    on_schema_change='append_new_columns',
     cluster_by=['order_date']
 ) }}
 
-with order_items as (
+{% if is_incremental() %}
+with previous_fact_state as (
+    select
+        order_item_id,
+        order_date,
+        previous_order_date
+    from {{ this }}
+),
+{% else %}
+with
+{% endif %}
+order_items as (
     select * from {{ ref('stg_order_items') }}
 ),
 orders as (
@@ -24,6 +36,14 @@ joined as (
         o.customer_id,
         oi.product_id,
         oi.order_date,
+        {% if is_incremental() %}
+        case
+            when previous.order_date <> oi.order_date then previous.order_date
+            else previous.previous_order_date
+        end as previous_order_date,
+        {% else %}
+        cast(null as date) as previous_order_date,
+        {% endif %}
         o.status,
         o.payment_method,
         oi.currency,
@@ -39,6 +59,9 @@ joined as (
     inner join orders o on oi.order_id = o.order_id
     inner join products p on oi.product_id = p.product_id
     inner join customers c on o.customer_id = c.customer_id
+    {% if is_incremental() %}
+    left join previous_fact_state previous on oi.order_item_id = previous.order_item_id
+    {% endif %}
 )
 select * from joined
 {% if is_incremental() %}

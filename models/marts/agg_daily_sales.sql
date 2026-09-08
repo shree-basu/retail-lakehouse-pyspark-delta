@@ -6,17 +6,30 @@
 ) }}
 
 {% if is_incremental() %}
-with changed_dates as (
-    select distinct order_date
+with changed_facts as (
+    select
+        order_date,
+        previous_order_date,
+        pipeline_ingested_at
     from {{ ref('fct_order_items') }}
     where pipeline_ingested_at >= (
         select coalesce(max(pipeline_ingested_at), cast('1900-01-01' as timestamp)) from {{ this }}
     )
 ),
+affected_dates as (
+    select distinct exploded.order_date
+    from changed_facts
+    lateral view explode(array(order_date, previous_order_date)) exploded as order_date
+    where exploded.order_date is not null
+),
+incremental_watermark as (
+    select max(pipeline_ingested_at) as pipeline_ingested_at
+    from changed_facts
+),
 {% else %}
 with
 {% endif %}
-daily as (
+current_daily as (
     select
         order_date,
         count(distinct order_id) as order_count,
@@ -27,8 +40,25 @@ daily as (
     from {{ ref('fct_order_items') }}
     where status = 'completed'
     {% if is_incremental() %}
-      and order_date in (select order_date from changed_dates)
+      and order_date in (select order_date from affected_dates)
     {% endif %}
     group by order_date
+),
+daily as (
+    {% if is_incremental() %}
+    select
+        affected.order_date,
+        coalesce(current.order_count, 0) as order_count,
+        coalesce(current.items_sold, 0) as items_sold,
+        cast(coalesce(current.revenue, 0) as decimal(20, 2)) as revenue,
+        current.source_updated_at,
+        coalesce(current.pipeline_ingested_at, watermark.pipeline_ingested_at)
+            as pipeline_ingested_at
+    from affected_dates affected
+    cross join incremental_watermark watermark
+    left join current_daily current on affected.order_date = current.order_date
+    {% else %}
+    select * from current_daily
+    {% endif %}
 )
 select * from daily
