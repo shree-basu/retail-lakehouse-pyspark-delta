@@ -1,0 +1,34 @@
+version: 2
+
+models:
+  - name: fct_order_items
+    description: One row per order item, enriched with order, customer, and product context.
+    columns:
+      - name: order_item_id
+        data_tests: [unique, not_null]
+      - name: order_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_orders')
+                field: order_id
+      - name: status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [completed, cancelled, refunded]
+      - name: line_revenue
+        data_tests: [not_null]
+  - name: agg_daily_sales
+    description: Completed-order metrics at one row per order date.
+    columns:
+      - name: order_date
+        data_tests: [unique, not_null]
+      - name: revenue
+        data_tests: [not_null]
+  - name: customer_360
+    description: Customer-level sales and engagement serving table.
+    columns:
+      - name: customer_id
+        data_tests: [unique, not_null]

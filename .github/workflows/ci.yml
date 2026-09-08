@@ -1,0 +1,54 @@
+name: Cloud-free CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, feat/lakehouse-production-realism]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-and-lakehouse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.lock
+      - name: Verify Java runtime
+        run: java -version
+      - name: Install hash-locked dependencies
+        run: python -m pip install --require-hashes -r requirements-dev.lock
+      - name: Static validation
+        run: |
+          python -m ruff check .
+          python -m ruff format --check .
+          python -m compileall -q retail_lakehouse src data scripts tests
+          git diff --check
+      - name: Repository deployment-safety gate
+        run: python scripts/check_repo_safety.py
+      - name: Spark, Delta, contract, and replay tests
+        run: python -m pytest -p no:cacheprovider -q
+
+  dbt-project-parse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dbt.lock
+      - name: Install hash-locked dbt adapter
+        run: python -m pip install --require-hashes -r requirements-dbt.lock
+      - name: Parse dbt graph without a warehouse connection
+        run: dbt parse --profiles-dir .github/dbt --no-partial-parse --warn-error

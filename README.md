@@ -1,272 +1,117 @@
-# Retail Lakehouse — PySpark & Delta Lake
+# Retail Lakehouse — Spark, Delta Lake, and dbt
 
-A PySpark and Delta Lake retail analytics pipeline implementing a Bronze–Silver–Gold lakehouse architecture with an ML-ready customer churn dataset.
+A production-pattern retail data platform that turns immutable structured and semi-structured batches into governed Delta tables and tested dbt marts. It is runnable with open-source Spark and Delta Lake while remaining compatible with a Databricks execution model.
+
+## What makes this more than a demo
+
+- Immutable `business_date/batch_id` paths with an exact five-entity manifest, SHA-256 checksums, row counts, formats, filenames, and schema version.
+- Explicit Spark schemas for four CSV entities and nested JSON customer events; schema inference is never used.
+- Bronze append transactions keyed by entity and the complete `business_date/batch_id` delivery identity, deterministic Silver deduplication, Delta `MERGE`, Change Data Feed, and replay-safe quarantine/audit publication.
+- Domain, type, natural-key, foreign-key, amount, currency, and malformed-record checks with `input = accepted + quarantined` reconciliation.
+- A separate execution ledger recording every `RUNNING`, `SUCCESS`, or `FAILED` attempt without changing the deterministic business run ID.
+- dbt staging models, an incremental order-item fact, old-and-new affected-date recomputation for daily sales corrections, a customer-360 mart, documentation, generic tests, and business-rule tests.
+- Early date/status filtering, narrow projections, explicit product-dimension broadcast, Adaptive Query Execution settings, and physical-plan assertions.
+- SHA-pinned GitHub actions, hash-locked Python environments, Linux Spark/Delta replay tests, and an inert dbt profile that cannot contact a warehouse.
 
 ## Architecture
 
-~~~text
-Raw CSV Data
-     |
-     v
-+--------------+
-|    BRONZE    |
-| Raw -> Delta |
-+------+-------+
-       |
-       v
-+--------------+
-|    SILVER    |
-| Clean/Typed  |
-| Deduplicated |
-+------+-------+
-       |
-       v
-+--------------------------+
-|           GOLD           |
-| Business + ML-ready data |
-+--------------------------+
-| customer_sales           |
-| product_sales            |
-| daily_sales              |
-| customer_churn           |
-+--------------------------+
-~~~
+```text
+Immutable source batch
+  customers.csv | products.csv | orders.csv | order_items.csv | customer_events.jsonl
+         │ manifest + count + SHA-256 + exact path validation
+         ▼
+Bronze Delta ── append-only payload + lineage + idempotent transaction ID
+         │ explicit typing and deterministic quality rules
+         ├──────────────► Quarantine Delta ── reason codes + rejected payload
+         ▼
+Silver Delta ── one current row per natural key + MERGE + CDF + date partitions
+         │
+         ├──────────────► Delta audit metrics and per-attempt run ledger
+         ▼
+dbt / Databricks SQL-compatible layer
+  staging views → incremental fct_order_items → agg_daily_sales + customer_360
+         ▼
+Tested analytical consumption
+```
 
-## Project Structure
+See [architecture](docs/architecture.md), [data contract](docs/data-contract.md), [quality and recovery](docs/data-quality-recovery.md), and [performance decisions](docs/performance.md).
 
-~~~text
-retail-lakehouse/
-|
-+-- config/
-|   +-- config.py
-|
-+-- data/
-|   +-- generate_sample_data.py
-|
-+-- src/
-|   +-- bronze.py
-|   +-- silver.py
-|   +-- gold.py
-|   +-- churn.py
-|   +-- spark_session.py
-|
-+-- tests/
-|   +-- test_silver.py
-|   +-- test_gold.py
-|   +-- test_churn.py
-|
-+-- .gitignore
-+-- requirements.txt
-+-- README.md
-~~~
+## Data grains
 
-## Technology Stack
-
-| Technology | Version | Purpose |
+| Dataset | Grain | Publication behavior |
 |---|---|---|
-| Python | 3.11 | Pipeline and transformation logic |
-| PySpark | 3.5.1 | Distributed data processing |
-| Delta Lake | 3.2.0 | Lakehouse table storage |
-| Apache Spark | 3.5.1 | Processing engine |
-| Pytest | 8.2.0 | Automated testing |
+| Bronze entities | One delivered source record | Append with deterministic Delta transaction identity |
+| Silver entities | One current row per declared natural key | Latest valid `updated_at` wins; Delta `MERGE` |
+| Quarantine | One rejected record per delivery/entity/hash | Insert-only merge; replay safe across reused batch IDs |
+| `fct_order_items` | One row per order item | dbt incremental merge |
+| `agg_daily_sales` | One row per order date | Recomputes complete totals for both previous and current affected dates |
+| `customer_360` | One row per customer | Full table rebuild from governed marts |
 
-## Pipeline Overview
+The current Silver design is a current-state model, not SCD Type 2. Source history remains in Bronze and Silver CDF records committed changes.
 
-### Bronze
+## Run locally
 
-The Bronze layer ingests raw retail CSV datasets into Delta tables.
+Python 3.11 and Java 17 are the tested runtime.
 
-Source datasets:
+```bash
+python -m venv .venv
+source .venv/Scripts/activate  # Windows Git Bash
+python -m pip install --require-hashes -r requirements-dev.lock
 
-- `customers`
-- `products`
-- `orders`
-- `order_items`
+python data/generate_sample_data.py \
+  --business-date 2026-09-06 \
+  --batch-id retail-20260906 \
+  --scenario normal
 
-Ingestion metadata is added:
+python -m retail_lakehouse.pipeline \
+  --batch-dir data/input/2026-09-06/retail-20260906 \
+  --lakehouse-root data/lakehouse
+```
 
-- `_ingested_at`
-- `_source_file`
+The generator also provides `duplicate-order`, `orphan-item`, `invalid-amount`, and compatible `schema-evolution` scenarios. It refuses to overwrite an existing batch.
 
-### Silver
+### Validate dbt without Databricks
 
-The Silver layer cleans and standardizes the Bronze datasets.
+```bash
+python -m pip install --require-hashes -r requirements-dbt.lock
+dbt parse --profiles-dir .github/dbt --no-partial-parse --warn-error
+```
 
-Transformations include:
+The CI profile points to `example.invalid` with a fake token. `dbt run` and `dbt build` are intentionally absent from CI because they require a real warehouse.
 
-- Data type casting
-- String trimming
-- Category standardization
-- Duplicate removal
-- Date and numeric normalization
+### Inspect optimization evidence
 
-Silver tables:
+```bash
+python scripts/benchmark_spark.py --rows 100000 --output evidence/performance/local.json
+```
 
-- `customers`
-- `products`
-- `orders`
-- `order_items`
+This optional benchmark records local synthetic timings only. It compares plan behavior and cache reuse on one machine; it is not production throughput, cost, or SLA evidence.
 
-### Gold
+## Validation
 
-The Gold layer produces business-oriented analytical datasets:
+```bash
+python -m ruff check .
+python -m ruff format --check .
+python -m compileall -q retail_lakehouse src data scripts tests
+python scripts/check_repo_safety.py
+python -m pytest -p no:cacheprovider -q
+dbt parse --profiles-dir .github/dbt --no-partial-parse --warn-error
+```
 
-- `customer_sales` — customer-level purchasing metrics
-- `product_sales` — product-level sales metrics
-- `daily_sales` — daily sales metrics
-- `customer_churn` — ML-ready customer features and churn labels
+Linux CI is authoritative for end-to-end local Delta replay because standard Windows Spark installations require Hadoop NativeIO binaries for some Delta filesystem operations. Pure Spark transformations are also validated locally on Windows with Python 3.11.
 
-## Customer Churn
+## Cost and deployment safety
 
-The project includes a rule-based churn-labeling pipeline for downstream ML experimentation.
+This repository has no deployment workflow, infrastructure apply path, Databricks/cloud credentials, OIDC permission, or use of GitHub secrets. CI can lint, parse, and test only. Browsing, cloning, opening a pull request, merging, or running CI cannot create Databricks or cloud resources.
 
-A customer is labeled as churned when:
+Someone can incur cost only by taking code outside this repository and deliberately configuring their own compute and warehouse credentials. That cost belongs to their account, not the repository owner.
 
-~~~text
-No previous order
-        OR
-90+ days since last order
-        |
-        v
-churn_label = 1
-~~~
+## Evidence boundary
 
-Otherwise:
+This is a **production-pattern reference implementation**, not evidence of a deployed production system. The repository proves local Spark transformations, Delta transaction/replay behavior on Linux CI, dbt graph compilation, contract enforcement, DQ/reconciliation logic, and physical-plan choices. It does not prove a Databricks workspace deployment, Unity Catalog controls, production-scale volume, measured cloud cost, production SLA, or active operations.
 
-~~~text
-churn_label = 0
-~~~
-
-A fixed reference date of `2025-01-01` is used so that generated labels remain reproducible.
-
-The churn dataset includes behavioral features such as:
-
-- `total_orders`
-- `total_items`
-- `total_spend`
-- `avg_order_value`
-- `days_since_last_order`
-- `country`
-- `segment`
-
-This project prepares the dataset for ML experimentation; it does not claim to train or evaluate a predictive churn model.
-
-## Testing
-
-The project includes transformation-level tests using Pytest.
-
-Run the complete test suite:
-
-~~~bash
-python -m pytest -v
-~~~
-
-Current test result:
-
-~~~text
-5 passed
-~~~
-
-Tests cover:
-
-- Customer deduplication
-- Product standardization
-- Customer sales aggregation
-- Product sales aggregation
-- Churn label generation
-
-## Running the Project
-
-### 1. Create the virtual environment
-
-~~~bash
-py -3.11 -m venv .venv
-~~~
-
-### 2. Activate the environment
-
-~~~bash
-source .venv/Scripts/activate
-~~~
-
-### 3. Install dependencies
-
-~~~bash
-pip install -r requirements.txt
-~~~
-
-### 4. Generate sample data
-
-~~~bash
-python data/generate_sample_data.py
-~~~
-
-### 5. Run the Bronze layer
-
-~~~bash
-python -m src.bronze
-~~~
-
-### 6. Run the Silver layer
-
-~~~bash
-python -m src.silver
-~~~
-
-### 7. Run the Gold layer
-
-~~~bash
-python -m src.gold
-~~~
-
-### 8. Generate the churn dataset
-
-~~~bash
-python -m src.churn
-~~~
-
-### 9. Run the complete test suite
-
-~~~bash
-python -m pytest -v
-~~~
-
-## Design Decisions
-
-### Medallion Architecture
-
-The pipeline separates ingestion, cleaning, and business-level transformations into Bronze, Silver, and Gold layers.
-
-This makes individual stages easier to understand, test, debug, and extend.
-
-### Delta Lake
-
-Delta Lake is used as the storage format for the Bronze, Silver, and Gold tables.
-
-### Reproducible Churn Labels
-
-The churn pipeline uses a fixed reference date rather than the current system date. This ensures that rerunning the project produces consistent labels against the same sample dataset.
-
-### Generated Data
-
-Generated Bronze, Silver, and Gold Delta artifacts are excluded from Git because they can be recreated by running the pipeline.
-
-## Future Enhancements
-
-Potential extensions include:
-
-- Incremental Delta ingestion
-- Data quality validation
-- Slowly Changing Dimensions
-- Spark partitioning and optimization
-- Airflow orchestration
-- GCP deployment
-- BigQuery integration
-- Churn model training and evaluation
-- CI/CD automation
+See [evidence](docs/evidence.md) for safe and qualified portfolio claims and [runbook](docs/runbook.md) for operation and recovery.
 
 ## Author
 
-**Shreetama Basu**
-
-Data Engineer | GCP | Python | SQL | PySpark
+**Shreetama Basu** — Data Engineering portfolio project
