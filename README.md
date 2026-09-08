@@ -6,10 +6,10 @@ A production-pattern retail data platform that turns immutable structured and se
 
 - Immutable `business_date/batch_id` paths with an exact five-entity manifest, SHA-256 checksums, row counts, formats, filenames, and schema version.
 - Explicit Spark schemas for four CSV entities and nested JSON customer events; schema inference is never used.
-- Bronze append transactions keyed by application and batch, deterministic Silver deduplication, Delta `MERGE`, Change Data Feed, and replay-safe quarantine/audit publication.
+- Bronze append transactions keyed by entity and the complete `business_date/batch_id` delivery identity, deterministic Silver deduplication, Delta `MERGE`, Change Data Feed, and replay-safe quarantine/audit publication.
 - Domain, type, natural-key, foreign-key, amount, currency, and malformed-record checks with `input = accepted + quarantined` reconciliation.
 - A separate execution ledger recording every `RUNNING`, `SUCCESS`, or `FAILED` attempt without changing the deterministic business run ID.
-- dbt staging models, an incremental order-item fact, affected-date recomputation for daily sales, a customer-360 mart, documentation, generic tests, and business-rule tests.
+- dbt staging models, an incremental order-item fact, old-and-new affected-date recomputation for daily sales corrections, a customer-360 mart, documentation, generic tests, and business-rule tests.
 - Early date/status filtering, narrow projections, explicit product-dimension broadcast, Adaptive Query Execution settings, and physical-plan assertions.
 - SHA-pinned GitHub actions, hash-locked Python environments, Linux Spark/Delta replay tests, and an inert dbt profile that cannot contact a warehouse.
 
@@ -42,9 +42,9 @@ See [architecture](docs/architecture.md), [data contract](docs/data-contract.md)
 |---|---|---|
 | Bronze entities | One delivered source record | Append with deterministic Delta transaction identity |
 | Silver entities | One current row per declared natural key | Latest valid `updated_at` wins; Delta `MERGE` |
-| Quarantine | One rejected record per batch/entity/hash | Insert-only merge; replay safe |
+| Quarantine | One rejected record per delivery/entity/hash | Insert-only merge; replay safe across reused batch IDs |
 | `fct_order_items` | One row per order item | dbt incremental merge |
-| `agg_daily_sales` | One row per order date | Recomputes dates affected by changed fact rows |
+| `agg_daily_sales` | One row per order date | Recomputes complete totals for both previous and current affected dates |
 | `customer_360` | One row per customer | Full table rebuild from governed marts |
 
 The current Silver design is a current-state model, not SCD Type 2. Source history remains in Bronze and Silver CDF records committed changes.

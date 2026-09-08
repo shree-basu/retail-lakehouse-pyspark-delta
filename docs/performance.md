@@ -7,6 +7,6 @@
 - Adaptive Query Execution, post-shuffle coalescing, and skew handling are enabled.
 - Global automatic schema merging is disabled.
 - Caching is confined to the local benchmark where one derived frame serves two actions, followed by `unpersist`; one-use production frames are not cached.
-- dbt daily aggregation recomputes only affected dates during incremental execution.
+- dbt daily aggregation recomputes only the prior and current dates affected by incremental corrections.
 
 `scripts/benchmark_spark.py` captures Spark version, row count, and local timings. Results vary by machine and do not establish production scale, cloud cost, or SLA. Production performance evidence requires representative data, a defined cluster, repeated runs, plan/spill/skew metrics, and cost normalization.

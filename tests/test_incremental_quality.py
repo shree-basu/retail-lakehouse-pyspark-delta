@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from retail_lakehouse.delta_io import transaction_version
+from retail_lakehouse.delta_io import bronze_transaction_application_id
 from retail_lakehouse.quality import (
     ReconciliationFailure,
     assert_reconciled,
@@ -125,8 +125,17 @@ def test_semistructured_event_preserves_evolving_attributes(spark) -> None:
     assert row.device_type == "mobile"
 
 
-def test_reconciliation_and_transaction_identity_fail_safely() -> None:
-    assert transaction_version("batch-a") == transaction_version("batch-a")
-    assert transaction_version("batch-a") != transaction_version("batch-b")
+def test_reconciliation_and_delivery_transaction_identity_fail_safely() -> None:
+    first = bronze_transaction_application_id(
+        entity="orders", business_date="2026-09-06", batch_id="batch-a"
+    )
+    replay = bronze_transaction_application_id(
+        entity="orders", business_date="2026-09-06", batch_id="batch-a"
+    )
+    later_delivery = bronze_transaction_application_id(
+        entity="orders", business_date="2026-09-07", batch_id="batch-a"
+    )
+    assert first == replay
+    assert first != later_delivery
     with pytest.raises(ReconciliationFailure, match="reconciliation failed"):
         assert_reconciled("orders", 10, 8, 1)

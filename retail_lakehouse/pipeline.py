@@ -224,6 +224,7 @@ def _process_validated_batch(
             frame,
             paths.bronze / entity,
             entity=entity,
+            business_date=manifest["business_date"],
             batch_id=manifest["batch_id"],
         )
         bronze[entity] = frame

@@ -4,7 +4,7 @@
 
 - Implemented distributed transformations with PySpark/Spark using explicit structured and nested semi-structured schemas.
 - Implemented an incremental Delta Lake medallion design with immutable batches, schema enforcement, deterministic DQ/quarantine, reconciliation, transaction identity, merges, and Change Data Feed.
-- Implemented dbt staging/mart models, documentation, generic/business tests, and incremental merge/affected-partition patterns.
+- Implemented dbt staging/mart models, documentation, generic/business tests, and an incremental correction pattern that rebuilds both previous and current affected dates.
 - Implemented concrete Spark tuning decisions: early filters/projections, bounded broadcast, date layout, AQE settings, plan inspection, and reuse-only caching in a benchmark.
 - Implemented replay, run-state audit, recovery guidance, repository safety checks, and cloud-free CI.
 
@@ -28,5 +28,6 @@
 | Spark schema, DQ, reconciliation | Windows/Python 3.11 | Linux/Python 3.11 |
 | Complete Delta replay | Windows blocked by Hadoop NativeIO dependency | Authoritative |
 | Physical-plan broadcast assertion | Yes | Yes |
+| dbt date-moving correction contract | Cloud-free semantic/static test | Cloud-free semantic/static test |
 | dbt parse with warnings as errors | Inert profile | Inert profile |
 | Databricks/cloud execution | Not performed | Impossible by workflow design |
